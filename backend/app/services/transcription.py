@@ -17,9 +17,11 @@ def transcribe(file_path: str, lead_id: int) -> dict:
         language="en-AU",
         smart_format=True,
         diarize=True,
+        diarize_version="latest",
         utterances=True,
         punctuate=True,
         paragraphs=True,
+        multichannel=False,
     )
 
     response = client.listen.rest.v("1").transcribe_file(source, options)
@@ -29,6 +31,8 @@ def transcribe(file_path: str, lead_id: int) -> dict:
 def _parse_response(response) -> dict:
     utterances = []
     raw_utterances = response.results.utterances or []
+
+    SPEAKER_LABELS = {0: "Agent", 1: "Customer"}
 
     for i, utt in enumerate(raw_utterances):
         words = []
@@ -44,10 +48,11 @@ def _parse_response(response) -> dict:
                 for w in utt.words
             ]
 
+        speaker_id = utt.speaker if utt.speaker is not None else 0
         utterances.append({
             "index": i,
-            "speaker": utt.speaker,
-            "speaker_label": f"Speaker {utt.speaker}",
+            "speaker": speaker_id,
+            "speaker_label": SPEAKER_LABELS.get(speaker_id, f"Speaker {speaker_id}"),
             "text": utt.transcript,
             "start": utt.start,
             "end": utt.end,

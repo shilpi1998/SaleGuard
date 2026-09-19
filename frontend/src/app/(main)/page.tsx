@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,6 +17,8 @@ import {
   getRepeatOffenders,
   getGateDistribution,
   getRetailers,
+  getAgentPerformance,
+  getAuditorAgreement,
 } from "@/lib/api";
 import type {
   DashboardSummary,
@@ -24,6 +26,8 @@ import type {
   RepeatOffender,
   GateDistribution,
   Retailer,
+  AgentPerformance,
+  AuditorAgreement,
 } from "@/lib/types";
 import {
   Tooltip,
@@ -37,6 +41,7 @@ import {
   ShieldCheck,
   ShieldAlert,
   TrendingUp,
+  TrendingDown,
   BarChart3,
   Activity,
   Users,
@@ -45,6 +50,11 @@ import {
   Users2,
   ChevronRight,
   Home,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Gauge,
+  Scale,
 } from "lucide-react";
 
 const GATE_COLORS: Record<string, string> = {
@@ -110,6 +120,30 @@ const CATEGORY_CONFIG: Record<
   },
 };
 
+type AgentSortKey =
+  | "agent_name"
+  | "leads_scored"
+  | "pass_rate"
+  | "critical_fail_rate"
+  | "avg_weighted_score"
+  | "avg_weighted_score_excl_fatal";
+
+function SortIcon({
+  column,
+  activeSort,
+}: {
+  column: AgentSortKey;
+  activeSort: { key: AgentSortKey; dir: "asc" | "desc" };
+}) {
+  if (activeSort.key !== column)
+    return <ArrowUpDown className="h-3.5 w-3.5 opacity-40" />;
+  return activeSort.dir === "asc" ? (
+    <ArrowUp className="h-3.5 w-3.5" />
+  ) : (
+    <ArrowDown className="h-3.5 w-3.5" />
+  );
+}
+
 export default function DashboardPage() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [criticalFails, setCriticalFails] = useState<CriticalFailBreakdown[]>([]);
@@ -117,11 +151,19 @@ export default function DashboardPage() {
   const [gateDistribution, setGateDistribution] = useState<GateDistribution[]>([]);
   const [retailers, setRetailers] = useState<Retailer[]>([]);
   const [retailerFilter, setRetailerFilter] = useState<string>("");
+  const [agentPerformance, setAgentPerformance] = useState<AgentPerformance[]>([]);
+  const [auditorAgreement, setAuditorAgreement] = useState<AuditorAgreement | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Drill-down state for the critical fails breakdown
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedRetailer, setSelectedRetailer] = useState<string | null>(null);
+
+  // Sort state for the agent performance table
+  const [agentSort, setAgentSort] = useState<{ key: AgentSortKey; dir: "asc" | "desc" }>({
+    key: "leads_scored",
+    dir: "desc",
+  });
 
   const loadData = useCallback((retailerId?: string) => {
     const params: Record<string, string> = {};
@@ -133,12 +175,16 @@ export default function DashboardPage() {
       getCriticalFails(params),
       getRepeatOffenders(params),
       getGateDistribution(params),
+      getAgentPerformance(params),
+      getAuditorAgreement(params),
     ])
-      .then(([s, cf, ro, gd]) => {
+      .then(([s, cf, ro, gd, ap, aa]) => {
         setSummary(s);
         setCriticalFails(cf);
         setRepeatOffenders(ro);
         setGateDistribution(gd);
+        setAgentPerformance(ap);
+        setAuditorAgreement(aa);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -155,6 +201,31 @@ export default function DashboardPage() {
     setSelectedRetailer(null);
     loadData(retailerId || undefined);
   };
+
+  const handleAgentSort = (key: AgentSortKey) => {
+    setAgentSort((prev) =>
+      prev.key === key
+        ? { key, dir: prev.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: "desc" }
+    );
+  };
+
+  const sortedAgentPerformance = useMemo(() => {
+    const { key, dir } = agentSort;
+    const rows = [...agentPerformance];
+    rows.sort((a, b) => {
+      const av = a[key];
+      const bv = b[key];
+      let cmp: number;
+      if (typeof av === "string" && typeof bv === "string") {
+        cmp = av.localeCompare(bv);
+      } else {
+        cmp = (av as number) - (bv as number);
+      }
+      return dir === "asc" ? cmp : -cmp;
+    });
+    return rows;
+  }, [agentPerformance, agentSort]);
 
   const pieData = gateDistribution.map((gd) => ({
     name: GATE_LABELS[gd.gate_decision] || gd.gate_decision,
@@ -265,7 +336,7 @@ export default function DashboardPage() {
 
       {/* Summary Cards */}
       {summary && (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -292,7 +363,23 @@ export default function DashboardPage() {
                 {(summary.pass_rate * 100).toFixed(1)}%
               </div>
               <p className="text-xs text-muted-foreground mt-1">
-                First-pass yield: {(summary.first_pass_yield * 100).toFixed(1)}%
+                Avg confidence: {(summary.avg_confidence * 100).toFixed(0)}%
+              </p>
+            </CardContent>
+          </Card>
+          <Card className="ring-1 ring-blue-200 dark:ring-blue-900">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                First-Pass Yield
+              </CardTitle>
+              <Gauge className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-blue-600 dark:text-blue-400">
+                {(summary.first_pass_yield * 100).toFixed(1)}%
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Sales that go green with no rework
               </p>
             </CardContent>
           </Card>
@@ -308,7 +395,7 @@ export default function DashboardPage() {
                 {(summary.critical_fail_rate * 100).toFixed(1)}%
               </div>
               <p className="text-xs text-muted-foreground mt-1">
-                Avg confidence: {(summary.avg_confidence * 100).toFixed(0)}%
+                Leads with at least one critical fail
               </p>
             </CardContent>
           </Card>
@@ -325,6 +412,22 @@ export default function DashboardPage() {
               </div>
               <p className="text-xs text-muted-foreground mt-1">
                 Across all scored leads
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Avg Score (excl. Fatal)
+              </CardTitle>
+              <TrendingDown className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold">
+                {(summary.avg_weighted_score_excl_fatal * 100).toFixed(1)}%
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Score with fatal factors excluded
               </p>
             </CardContent>
           </Card>
@@ -367,6 +470,193 @@ export default function DashboardPage() {
           ) : (
             <div className="h-[280px] flex items-center justify-center text-muted-foreground">
               No scored leads yet
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Agent Performance */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Users className="h-5 w-5" />
+            Agent Performance
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Per-agent scoring stats. Click a column header to sort.
+          </p>
+        </CardHeader>
+        <CardContent className="p-0">
+          {sortedAgentPerformance.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>
+                    <button
+                      className="flex items-center gap-1 hover:text-foreground"
+                      onClick={() => handleAgentSort("agent_name")}
+                    >
+                      Agent <SortIcon column="agent_name" activeSort={agentSort} />
+                    </button>
+                  </TableHead>
+                  <TableHead>Employee ID</TableHead>
+                  <TableHead>Site</TableHead>
+                  <TableHead>Team Leader</TableHead>
+                  <TableHead className="text-right">
+                    <button
+                      className="flex items-center gap-1 justify-end w-full hover:text-foreground"
+                      onClick={() => handleAgentSort("leads_scored")}
+                    >
+                      Leads Scored <SortIcon column="leads_scored" activeSort={agentSort} />
+                    </button>
+                  </TableHead>
+                  <TableHead className="text-right">
+                    <button
+                      className="flex items-center gap-1 justify-end w-full hover:text-foreground"
+                      onClick={() => handleAgentSort("pass_rate")}
+                    >
+                      Pass Rate <SortIcon column="pass_rate" activeSort={agentSort} />
+                    </button>
+                  </TableHead>
+                  <TableHead className="text-right">
+                    <button
+                      className="flex items-center gap-1 justify-end w-full hover:text-foreground"
+                      onClick={() => handleAgentSort("critical_fail_rate")}
+                    >
+                      Critical Fail Rate <SortIcon column="critical_fail_rate" activeSort={agentSort} />
+                    </button>
+                  </TableHead>
+                  <TableHead className="text-right">
+                    <button
+                      className="flex items-center gap-1 justify-end w-full hover:text-foreground"
+                      onClick={() => handleAgentSort("avg_weighted_score")}
+                    >
+                      Avg Score <SortIcon column="avg_weighted_score" activeSort={agentSort} />
+                    </button>
+                  </TableHead>
+                  <TableHead className="text-right">
+                    <button
+                      className="flex items-center gap-1 justify-end w-full hover:text-foreground"
+                      onClick={() => handleAgentSort("avg_weighted_score_excl_fatal")}
+                    >
+                      Avg Score (excl. Fatal) <SortIcon column="avg_weighted_score_excl_fatal" activeSort={agentSort} />
+                    </button>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sortedAgentPerformance.map((ap) => (
+                  <TableRow key={ap.agent_id}>
+                    <TableCell className="font-medium">{ap.agent_name}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {ap.employee_id}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {ap.site || "—"}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {ap.team_leader_name || "—"}
+                    </TableCell>
+                    <TableCell className="text-right">{ap.leads_scored}</TableCell>
+                    <TableCell className="text-right font-medium text-green-600 dark:text-green-400">
+                      {(ap.pass_rate * 100).toFixed(1)}%
+                    </TableCell>
+                    <TableCell className="text-right font-medium text-red-600 dark:text-red-400">
+                      {(ap.critical_fail_rate * 100).toFixed(1)}%
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {(ap.avg_weighted_score * 100).toFixed(1)}%
+                    </TableCell>
+                    <TableCell className="text-right text-muted-foreground">
+                      {(ap.avg_weighted_score_excl_fatal * 100).toFixed(1)}%
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : (
+            <div className="py-16 text-center text-muted-foreground">
+              No agent performance data yet
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Auditor Agreement / Model Calibration */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Scale className="h-5 w-5" />
+            Auditor Agreement / Model Calibration
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            How often human overrides agree with the AI model. Higher
+            agreement means better model calibration.
+          </p>
+        </CardHeader>
+        <CardContent>
+          {auditorAgreement ? (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-lg border p-4">
+                <p className="text-sm text-muted-foreground">Agreement Rate</p>
+                <div className="text-3xl font-bold text-blue-600 dark:text-blue-400 mt-1">
+                  {(auditorAgreement.agreement_rate * 100).toFixed(1)}%
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Results left unchanged by human review
+                </p>
+              </div>
+              <div className="rounded-lg border p-4">
+                <p className="text-sm text-muted-foreground">Total Overrides</p>
+                <div className="text-3xl font-bold mt-1">
+                  {auditorAgreement.total_overrides}
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  In the selected date range
+                </p>
+              </div>
+              <div className="rounded-lg border p-4">
+                <p className="text-sm text-muted-foreground">
+                  FAIL &rarr; PASS
+                </p>
+                <div className="text-3xl font-bold text-green-600 dark:text-green-400 mt-1">
+                  {auditorAgreement.total_overrides > 0
+                    ? (
+                        (auditorAgreement.fail_to_pass_count /
+                          auditorAgreement.total_overrides) *
+                        100
+                      ).toFixed(1)
+                    : "0.0"}
+                  %
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {auditorAgreement.fail_to_pass_count} overrides — model was too
+                  strict
+                </p>
+              </div>
+              <div className="rounded-lg border p-4">
+                <p className="text-sm text-muted-foreground">
+                  FAIL &rarr; NOTE
+                </p>
+                <div className="text-3xl font-bold text-amber-600 dark:text-amber-400 mt-1">
+                  {auditorAgreement.total_overrides > 0
+                    ? (
+                        (auditorAgreement.fail_to_note_count /
+                          auditorAgreement.total_overrides) *
+                        100
+                      ).toFixed(1)
+                    : "0.0"}
+                  %
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {auditorAgreement.fail_to_note_count} overrides — downgraded to
+                  note
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="py-8 text-center text-muted-foreground">
+              No auditor agreement data yet
             </div>
           )}
         </CardContent>

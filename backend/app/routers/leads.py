@@ -57,7 +57,13 @@ def list_leads(
     if status is not None:
         query = query.filter(models.Lead.status == status)
     if gate_decision is not None:
-        query = query.filter(models.Lead.gate_decision == gate_decision)
+        # Supports comma-separated list of gate decisions, e.g.
+        # "held_critical_fail,held_low_confidence,held_random_sample"
+        values = [v.strip() for v in gate_decision.split(",") if v.strip()]
+        if len(values) == 1:
+            query = query.filter(models.Lead.gate_decision == values[0])
+        elif len(values) > 1:
+            query = query.filter(models.Lead.gate_decision.in_(values))
 
     rows = (
         query.order_by(models.Lead.created_at.desc())
@@ -245,7 +251,12 @@ def transcribe_lead(lead_id: int, db: Session = Depends(get_db)):
 
     from app.services.transcription import transcribe
 
-    result = transcribe(recording.file_path, lead_id)
+    file_path = recording.file_path
+    if not os.path.isabs(file_path):
+        from app.config import _BACKEND_DIR
+        file_path = os.path.join(_BACKEND_DIR, file_path.lstrip("./"))
+
+    result = transcribe(file_path, lead_id)
 
     transcript = (
         db.query(models.Transcript).filter(models.Transcript.lead_id == lead_id).first()
@@ -320,8 +331,13 @@ def process_lead(
             )
 
         from app.services.transcription import transcribe
+        from app.config import _BACKEND_DIR
 
-        result = transcribe(recording.file_path, lead_id)
+        proc_file_path = recording.file_path
+        if not os.path.isabs(proc_file_path):
+            proc_file_path = os.path.join(_BACKEND_DIR, proc_file_path.lstrip("./"))
+
+        result = transcribe(proc_file_path, lead_id)
         transcript = models.Transcript(
             lead_id=lead_id,
             recording_id=recording.id,
@@ -363,7 +379,10 @@ def get_scorecard(lead_id: int, db: Session = Depends(get_db)):
 
     results = (
         db.query(models.ScoreResult)
-        .options(joinedload(models.ScoreResult.check))
+        .options(
+            joinedload(models.ScoreResult.check),
+            joinedload(models.ScoreResult.overrides),
+        )
         .filter(models.ScoreResult.lead_id == lead_id)
         .order_by(models.ScoreResult.id)
         .all()

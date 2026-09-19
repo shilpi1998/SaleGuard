@@ -20,11 +20,12 @@ import {
   uploadTranscript,
   uploadRecording,
   deleteRecording,
+  transcribeLead,
   scoreLead,
   processLead,
 } from "@/lib/api";
 import type { Lead, Scorecard, Transcript, ScoreResult, Recording } from "@/lib/types";
-import { FileText, Play, Pause, Volume2, CheckCircle, XCircle, AlertTriangle, ShieldAlert, Clock, MessageSquareQuote, Mic, Square, Trash2 } from "lucide-react";
+import { FileText, Play, Pause, Volume2, CheckCircle, XCircle, AlertTriangle, ShieldAlert, Clock, MessageSquareQuote, Mic, Square, Trash2, AudioLines, UserCheck, Undo2 } from "lucide-react";
 
 function resultColor(result: string) {
   switch (result) {
@@ -121,6 +122,7 @@ export default function ScorecardPage() {
   const chunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [uploadingRecording, setUploadingRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
 
   useEffect(() => {
     getLead(leadId).then(setLead).catch(console.error);
@@ -205,15 +207,17 @@ export default function ScorecardPage() {
     setError(null);
     try {
       if (transcript && !recording) {
-        const sc = await scoreLead(leadId);
-        setScorecard(sc);
+        await scoreLead(leadId);
       } else {
-        const result = await processLead(leadId);
-        setScorecard(result.scorecard);
+        await processLead(leadId);
       }
-      const updatedLead = await getLead(leadId);
+      const [updatedLead, fullScorecard, updatedTranscript] = await Promise.all([
+        getLead(leadId),
+        getScorecard(leadId),
+        getTranscript(leadId).catch(() => null),
+      ]);
       setLead(updatedLead);
-      const updatedTranscript = await getTranscript(leadId).catch(() => null);
+      setScorecard(fullScorecard);
       if (updatedTranscript) setTranscript(updatedTranscript);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Processing failed");
@@ -233,6 +237,19 @@ export default function ScorecardPage() {
       setDuration(0);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to delete recording");
+    }
+  };
+
+  const handleTranscribe = async () => {
+    setTranscribing(true);
+    setError(null);
+    try {
+      const t = await transcribeLead(leadId);
+      setTranscript(t);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Transcription failed");
+    } finally {
+      setTranscribing(false);
     }
   };
 
@@ -315,8 +332,18 @@ export default function ScorecardPage() {
               </Button>
             </div>
           )}
+          {recording && !transcript && !scorecard && (
+            <Button
+              variant="outline"
+              onClick={handleTranscribe}
+              disabled={transcribing}
+            >
+              <AudioLines className="h-4 w-4 mr-2" />
+              {transcribing ? "Transcribing..." : "Transcribe"}
+            </Button>
+          )}
           {(recording || transcript) && !scorecard && (
-            <Button onClick={handleProcess} disabled={processing} size="lg">
+            <Button onClick={handleProcess} disabled={processing || transcribing} size="lg">
               {processing ? "Scoring..." : "Score This Lead"}
             </Button>
           )}
@@ -462,6 +489,77 @@ export default function ScorecardPage() {
             )}
         </div>
       )}
+
+      {/* Human Review Outcome — shown when admin sets a review status */}
+      {lead.status && ["acknowledged", "discussing_with_customer", "checking_crm", "approved", "rejected"].includes(lead.status) && scorecard && (() => {
+        const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
+          acknowledged: { label: "Acknowledged", color: "bg-blue-50 border-blue-200 text-blue-800 dark:bg-blue-900/20 dark:border-blue-800 dark:text-blue-400" },
+          discussing_with_customer: { label: "Discussing with Customer", color: "bg-purple-50 border-purple-200 text-purple-800 dark:bg-purple-900/20 dark:border-purple-800 dark:text-purple-400" },
+          checking_crm: { label: "Checking CRM", color: "bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-400" },
+          approved: { label: "Approved by Human Auditor", color: "bg-green-50 border-green-200 text-green-800 dark:bg-green-900/20 dark:border-green-800 dark:text-green-400" },
+          rejected: { label: "Rejected by Human Auditor", color: "bg-red-50 border-red-200 text-red-800 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400" },
+        };
+        const cfg = STATUS_CONFIG[lead.status];
+        if (!cfg) return null;
+
+        const allOverrides = scorecard.results
+          ?.flatMap((r: ScoreResult) => (r.overrides || []).map(ov => ({ ...ov, checkName: r.check?.name || `Check #${r.check_id}` })))
+          || [];
+        const overriddenToPass = allOverrides.filter(ov => ov.new_result === "PASS");
+
+        return (
+          <div className={`border rounded-lg px-6 py-4 ${cfg.color}`}>
+            <div className="flex items-center gap-3 mb-1">
+              <UserCheck className="h-6 w-6 flex-shrink-0" />
+              <div>
+                <p className="font-semibold text-lg">{cfg.label}</p>
+                <p className="text-sm opacity-80">
+                  This lead has been reviewed by a human auditor
+                  {scorecard.failed > 0 && (
+                    <> &middot; {scorecard.failed} AI-flagged discrepanc{scorecard.failed === 1 ? "y" : "ies"} observed</>
+                  )}
+                  {overriddenToPass.length > 0 && (
+                    <> &middot; {overriddenToPass.length} override{overriddenToPass.length !== 1 ? "s" : ""} applied</>
+                  )}
+                </p>
+              </div>
+            </div>
+
+            {allOverrides.length > 0 && (
+              <div className="mt-3 border-t border-current/15 pt-3 space-y-2">
+                <p className="text-sm font-semibold flex items-center gap-1.5">
+                  <Undo2 className="h-4 w-4" />
+                  Audit Trail — Human Overrides
+                </p>
+                {allOverrides.map((ov) => (
+                  <div key={ov.id} className="bg-background/70 dark:bg-background/40 border border-border rounded px-3 py-2 text-foreground text-sm">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium">{ov.checkName}</span>
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400">{ov.original_result}</span>
+                      <span className="text-muted-foreground">&rarr;</span>
+                      <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                        ov.new_result === "PASS"
+                          ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400"
+                          : "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400"
+                      }`}>{ov.new_result}</span>
+                      <span className="text-xs text-muted-foreground ml-auto">
+                        by <span className="font-medium text-foreground">{ov.overridden_by}</span> &middot; {new Date(ov.created_at).toLocaleString()}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1 italic">&ldquo;{ov.reason}&rdquo;</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {lead.status === "approved" && scorecard.failed > 0 && allOverrides.length === 0 && (
+              <p className="text-sm opacity-80 mt-3 border-t border-current/15 pt-3">
+                The auditor approved this lead despite {scorecard.failed} flagged check{scorecard.failed !== 1 ? "s" : ""}. No individual overrides were recorded — the approval covers the lead as a whole.
+              </p>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Score Summary Cards */}
       {scorecard && (
@@ -690,12 +788,34 @@ export default function ScorecardPage() {
                   </span>
                 </div>
 
-                {/* Row 3: Evidence quote */}
+                {/* Row 3: Evidence quote with timestamp */}
                 <div className="mb-2">
                   <div className="flex items-start gap-2">
                     <MessageSquareQuote className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="text-xs font-medium text-muted-foreground mb-1">Transcript Evidence</p>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <p className="text-xs font-medium text-muted-foreground">Transcript Evidence</p>
+                        {(r.audio_timestamp_start > 0 || r.audio_timestamp_end > 0) && (
+                          <button
+                            onClick={() => audioSrc && seekTo(r.audio_timestamp_start)}
+                            className={`inline-flex items-center gap-1 text-xs font-mono px-1.5 py-0.5 rounded ${
+                              audioSrc
+                                ? "bg-primary/10 text-primary hover:bg-primary/20 cursor-pointer"
+                                : "bg-muted text-muted-foreground"
+                            }`}
+                            title={audioSrc ? "Click to play from this timestamp" : "Timestamp"}
+                          >
+                            <Clock className="h-3 w-3" />
+                            {formatTime(r.audio_timestamp_start)} – {formatTime(r.audio_timestamp_end)}
+                            {audioSrc && <Play className="h-2.5 w-2.5" />}
+                          </button>
+                        )}
+                        {r.transcript_utterance_index >= 0 && (
+                          <span className="text-xs text-muted-foreground">
+                            Utterance #{r.transcript_utterance_index}
+                          </span>
+                        )}
+                      </div>
                       <p className="text-sm italic bg-background/80 dark:bg-background/40 rounded px-3 py-2 border border-border">
                         &ldquo;{r.evidence_text}&rdquo;
                       </p>

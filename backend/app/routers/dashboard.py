@@ -47,6 +47,7 @@ def get_summary(
             critical_fail_rate=0.0,
             first_pass_yield=0.0,
             avg_weighted_score=0.0,
+            avg_weighted_score_excl_fatal=0.0,
             avg_confidence=0.0,
         )
 
@@ -62,6 +63,9 @@ def get_summary(
     critical_fail_rate = critical_fail_count / total_scored
     first_pass_yield = total_passed / total_scored
     avg_weighted_score = sum(sc.weighted_score for sc in scorecards) / total_scored
+    avg_weighted_score_excl_fatal = (
+        sum(sc.weighted_score_excl_fatal for sc in scorecards) / total_scored
+    )
 
     lead_ids = [sc.lead_id for sc in scorecards]
     avg_confidence_row = (
@@ -79,6 +83,7 @@ def get_summary(
         critical_fail_rate=critical_fail_rate,
         first_pass_yield=first_pass_yield,
         avg_weighted_score=avg_weighted_score,
+        avg_weighted_score_excl_fatal=avg_weighted_score_excl_fatal,
         avg_confidence=avg_confidence,
     )
 
@@ -231,3 +236,233 @@ def get_repeat_offenders(
 
     results.sort(key=lambda r: r.critical_fail_count, reverse=True)
     return results
+
+
+@router.get("/agent-performance", response_model=list[schemas.AgentPerformance])
+def get_agent_performance(
+    retailer_id: int | None = None,
+    from_date: date | None = None,
+    to_date: date | None = None,
+    db: Session = Depends(get_db),
+):
+    resolved_from, resolved_to = _default_date_range(from_date, to_date)
+
+    query = (
+        db.query(models.Scorecard, models.Lead, models.Agent)
+        .join(models.Lead, models.Scorecard.lead_id == models.Lead.id)
+        .join(models.Agent, models.Lead.agent_id == models.Agent.id)
+        .filter(
+            func.date(models.Scorecard.created_at) >= resolved_from,
+            func.date(models.Scorecard.created_at) <= resolved_to,
+        )
+    )
+    if retailer_id is not None:
+        query = query.filter(models.Scorecard.retailer_id == retailer_id)
+
+    rows = query.all()
+
+    agent_stats: dict[int, dict] = {}
+    for scorecard, lead, agent in rows:
+        stats = agent_stats.setdefault(
+            agent.id,
+            {
+                "agent_id": agent.id,
+                "agent_name": agent.name,
+                "employee_id": agent.employee_id,
+                "site": agent.site,
+                "team_leader_name": agent.team_leader_name,
+                "leads_scored": 0,
+                "passed": 0,
+                "failed": 0,
+                "critical_fail_count": 0,
+                "weighted_score_sum": 0.0,
+                "weighted_score_excl_fatal_sum": 0.0,
+            },
+        )
+        stats["leads_scored"] += 1
+        if scorecard.gate_decision == GateDecision.AUTO_SUBMIT.value:
+            stats["passed"] += 1
+        else:
+            stats["failed"] += 1
+        if (scorecard.critical_total - scorecard.critical_passed) > 0:
+            stats["critical_fail_count"] += 1
+        stats["weighted_score_sum"] += scorecard.weighted_score
+        stats["weighted_score_excl_fatal_sum"] += scorecard.weighted_score_excl_fatal
+
+    results: list[schemas.AgentPerformance] = []
+    for stats in agent_stats.values():
+        leads_scored = stats["leads_scored"]
+        pass_rate = stats["passed"] / leads_scored if leads_scored else 0.0
+        critical_fail_rate = (
+            stats["critical_fail_count"] / leads_scored if leads_scored else 0.0
+        )
+        avg_weighted_score = (
+            stats["weighted_score_sum"] / leads_scored if leads_scored else 0.0
+        )
+        avg_weighted_score_excl_fatal = (
+            stats["weighted_score_excl_fatal_sum"] / leads_scored if leads_scored else 0.0
+        )
+        results.append(
+            schemas.AgentPerformance(
+                agent_id=stats["agent_id"],
+                agent_name=stats["agent_name"],
+                employee_id=stats["employee_id"],
+                site=stats["site"],
+                team_leader_name=stats["team_leader_name"],
+                leads_scored=leads_scored,
+                passed=stats["passed"],
+                failed=stats["failed"],
+                pass_rate=pass_rate,
+                critical_fail_count=stats["critical_fail_count"],
+                critical_fail_rate=critical_fail_rate,
+                avg_weighted_score=avg_weighted_score,
+                avg_weighted_score_excl_fatal=avg_weighted_score_excl_fatal,
+            )
+        )
+
+    results.sort(key=lambda r: r.leads_scored, reverse=True)
+    return results
+
+
+_BREAKDOWN_DIMENSIONS = {"campaign", "site", "team_leader"}
+
+
+@router.get("/breakdown", response_model=list[schemas.DimensionBreakdown])
+def get_breakdown(
+    group_by: str = Query(default="campaign"),
+    retailer_id: int | None = None,
+    from_date: date | None = None,
+    to_date: date | None = None,
+    db: Session = Depends(get_db),
+):
+    if group_by not in _BREAKDOWN_DIMENSIONS:
+        group_by = "campaign"
+
+    resolved_from, resolved_to = _default_date_range(from_date, to_date)
+
+    query = (
+        db.query(models.Scorecard, models.Lead, models.Agent)
+        .join(models.Lead, models.Scorecard.lead_id == models.Lead.id)
+        .outerjoin(models.Agent, models.Lead.agent_id == models.Agent.id)
+        .filter(
+            func.date(models.Scorecard.created_at) >= resolved_from,
+            func.date(models.Scorecard.created_at) <= resolved_to,
+        )
+    )
+    if retailer_id is not None:
+        query = query.filter(models.Scorecard.retailer_id == retailer_id)
+
+    rows = query.all()
+
+    group_stats: dict[str, dict] = {}
+    for scorecard, lead, agent in rows:
+        if group_by == "campaign":
+            group_name = lead.campaign or "Unspecified"
+        elif group_by == "site":
+            group_name = (agent.site if agent else None) or "Unspecified"
+        else:  # team_leader
+            group_name = (agent.team_leader_name if agent else None) or "Unspecified"
+
+        stats = group_stats.setdefault(
+            group_name,
+            {
+                "group_name": group_name,
+                "leads_scored": 0,
+                "passed": 0,
+                "failed": 0,
+                "critical_fail_count": 0,
+                "weighted_score_sum": 0.0,
+            },
+        )
+        stats["leads_scored"] += 1
+        if scorecard.gate_decision == GateDecision.AUTO_SUBMIT.value:
+            stats["passed"] += 1
+        else:
+            stats["failed"] += 1
+        if (scorecard.critical_total - scorecard.critical_passed) > 0:
+            stats["critical_fail_count"] += 1
+        stats["weighted_score_sum"] += scorecard.weighted_score
+
+    results: list[schemas.DimensionBreakdown] = []
+    for stats in group_stats.values():
+        leads_scored = stats["leads_scored"]
+        pass_rate = stats["passed"] / leads_scored if leads_scored else 0.0
+        critical_fail_rate = (
+            stats["critical_fail_count"] / leads_scored if leads_scored else 0.0
+        )
+        avg_weighted_score = (
+            stats["weighted_score_sum"] / leads_scored if leads_scored else 0.0
+        )
+        results.append(
+            schemas.DimensionBreakdown(
+                group_name=stats["group_name"],
+                leads_scored=leads_scored,
+                passed=stats["passed"],
+                failed=stats["failed"],
+                pass_rate=pass_rate,
+                critical_fail_rate=critical_fail_rate,
+                avg_weighted_score=avg_weighted_score,
+            )
+        )
+
+    results.sort(key=lambda r: r.leads_scored, reverse=True)
+    return results
+
+
+@router.get("/auditor-agreement", response_model=schemas.AuditorAgreement)
+def get_auditor_agreement(
+    retailer_id: int | None = None,
+    from_date: date | None = None,
+    to_date: date | None = None,
+    db: Session = Depends(get_db),
+):
+    resolved_from, resolved_to = _default_date_range(from_date, to_date)
+
+    override_query = db.query(models.Override).filter(
+        func.date(models.Override.created_at) >= resolved_from,
+        func.date(models.Override.created_at) <= resolved_to,
+    )
+    if retailer_id is not None:
+        override_query = override_query.join(
+            models.Lead, models.Override.lead_id == models.Lead.id
+        ).filter(models.Lead.retailer_id == retailer_id)
+
+    overrides = override_query.all()
+
+    total_overrides = len(overrides)
+    fail_to_pass_count = sum(
+        1
+        for o in overrides
+        if o.original_result == models.ResultEnum.FAIL.value
+        and o.new_result == models.ResultEnum.PASS.value
+    )
+    fail_to_note_count = sum(
+        1
+        for o in overrides
+        if o.original_result == models.ResultEnum.FAIL.value
+        and o.new_result == models.ResultEnum.NOTE.value
+    )
+
+    # Agreement rate: of all score results in range, what fraction ended up
+    # with a final result matching the AI's original result (i.e. was never
+    # overridden). Higher = better AI/human calibration.
+    result_query = db.query(models.ScoreResult).filter(
+        func.date(models.ScoreResult.created_at) >= resolved_from,
+        func.date(models.ScoreResult.created_at) <= resolved_to,
+    )
+    if retailer_id is not None:
+        result_query = result_query.join(
+            models.Lead, models.ScoreResult.lead_id == models.Lead.id
+        ).filter(models.Lead.retailer_id == retailer_id)
+
+    total_results = result_query.count()
+    agreement_rate = (
+        (total_results - total_overrides) / total_results if total_results else 0.0
+    )
+
+    return schemas.AuditorAgreement(
+        total_overrides=total_overrides,
+        fail_to_pass_count=fail_to_pass_count,
+        fail_to_note_count=fail_to_note_count,
+        agreement_rate=agreement_rate,
+    )

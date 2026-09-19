@@ -208,6 +208,27 @@ class AdminCheckUpdate(BaseModel):
     version: int | None = None
 
 
+# --- Override ---
+
+class OverrideCreate(BaseModel):
+    new_result: str = Field(..., pattern="^(PASS|FAIL|NOTE)$")
+    overridden_by: str
+    reason: str = Field(..., min_length=1)
+
+
+class OverrideOut(BaseModel):
+    id: int
+    score_result_id: int
+    lead_id: int
+    original_result: str
+    new_result: str
+    overridden_by: str
+    reason: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 # --- Score Result ---
 
 class ScoreResultOut(BaseModel):
@@ -228,6 +249,7 @@ class ScoreResultOut(BaseModel):
     latency_ms: int | None
     created_at: datetime
     check: CheckOut | None = None
+    overrides: list[OverrideOut] = []
 
     model_config = {"from_attributes": True}
 
@@ -255,27 +277,6 @@ class ScorecardOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-# --- Override ---
-
-class OverrideCreate(BaseModel):
-    new_result: str = Field(..., pattern="^(PASS|FAIL|NOTE)$")
-    overridden_by: str
-    reason: str = Field(..., min_length=1)
-
-
-class OverrideOut(BaseModel):
-    id: int
-    score_result_id: int
-    lead_id: int
-    original_result: str
-    new_result: str
-    overridden_by: str
-    reason: str
-    created_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
 # --- Dashboard ---
 
 class DashboardSummary(BaseModel):
@@ -286,6 +287,7 @@ class DashboardSummary(BaseModel):
     critical_fail_rate: float
     first_pass_yield: float
     avg_weighted_score: float
+    avg_weighted_score_excl_fatal: float
     avg_confidence: float
 
 
@@ -311,6 +313,39 @@ class RepeatOffender(BaseModel):
 class GateDistribution(BaseModel):
     gate_decision: str
     count: int
+
+
+class AgentPerformance(BaseModel):
+    agent_id: int
+    agent_name: str
+    employee_id: str
+    site: str | None
+    team_leader_name: str | None
+    leads_scored: int
+    passed: int
+    failed: int
+    pass_rate: float
+    critical_fail_count: int
+    critical_fail_rate: float
+    avg_weighted_score: float
+    avg_weighted_score_excl_fatal: float
+
+
+class DimensionBreakdown(BaseModel):
+    group_name: str
+    leads_scored: int
+    passed: int
+    failed: int
+    pass_rate: float
+    critical_fail_rate: float
+    avg_weighted_score: float
+
+
+class AuditorAgreement(BaseModel):
+    total_overrides: int
+    fail_to_pass_count: int
+    fail_to_note_count: int
+    agreement_rate: float
 
 
 # --- Process Pipeline ---

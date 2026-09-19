@@ -1127,6 +1127,24 @@ def _seed_sample_leads(db: Session, retailers: dict, agents: list) -> list:
                 "current_provider": "iPRIMUS",
             },
         },
+        {
+            "external_id": "LEAD-2024-007",
+            "retailer_id": retailers["AGL"].id,
+            "agent_id": agents[0].id,
+            "campaign": "Energy Switch Q3",
+            "customer_name": "Priya Sharma",
+            "plan_name": "AGL Value Saver",
+            "plan_rate": "26.4c/kWh",
+            "sale_date": date.today(),
+            "crm_data": {
+                "plan_rate": "26.4c/kWh",
+                "plan_name": "AGL Value Saver",
+                "email": "priya.sharma@email.com",
+                "address": "18 Bourke St, Melbourne VIC 3000",
+                "dmo_comparison": "-12% below DMO",
+                "contract_term": "No lock-in",
+            },
+        },
     ]
 
     leads = []
@@ -1184,19 +1202,30 @@ def _seed_synthetic_transcripts(db: Session, leads: list):
 
     # Lead 4: Aussie Broadband — good call, should PASS
     abb_pass_transcript = [
-        {"index": 0, "speaker": 0, "speaker_label": "Agent", "text": "Hi there, this is Tom from CIMET. Just letting you know this call is being recorded for quality and compliance purposes. Am I speaking with Sophie?", "start": 0.0, "end": 7.0, "words": []},
-        {"index": 1, "speaker": 1, "speaker_label": "Customer", "text": "Yes, Sophie Taylor here.", "start": 7.5, "end": 9.0, "words": []},
-        {"index": 2, "speaker": 0, "speaker_label": "Agent", "text": "Thanks Sophie. Can I please confirm your full name and the address where the service will be connected?", "start": 9.5, "end": 14.5, "words": []},
-        {"index": 3, "speaker": 1, "speaker_label": "Customer", "text": "It's Sophie Louise Taylor, 42 Harbour Street, Sydney, 2000.", "start": 15.0, "end": 19.0, "words": []},
-        {"index": 4, "speaker": 0, "speaker_label": "Agent", "text": "Perfect. So Sophie, I've checked your address and great news — you've got FTTP fibre to the premises, which is the best NBN technology. I'd recommend the Aussie Broadband NBN 100 plan. That's the 100 megabit speed tier, and on this connection you can expect a typical evening speed of around 90 Mbps.", "start": 19.5, "end": 34.0, "words": []},
-        {"index": 5, "speaker": 1, "speaker_label": "Customer", "text": "That sounds great. How much is it per month?", "start": 34.5, "end": 37.0, "words": []},
-        {"index": 6, "speaker": 0, "speaker_label": "Agent", "text": "The Aussie Broadband NBN 100 is $79 per month. And there's no lock-in contract, it's completely month-to-month so you can cancel anytime.", "start": 37.5, "end": 45.0, "words": []},
-        {"index": 7, "speaker": 1, "speaker_label": "Customer", "text": "Nice, no lock-in is a big plus. I think I'd like to go ahead.", "start": 45.5, "end": 49.0, "words": []},
-        {"index": 8, "speaker": 0, "speaker_label": "Agent", "text": "Wonderful. So based on what we've discussed, do you agree to sign up for this Aussie Broadband plan? I need a clear yes to proceed.", "start": 49.5, "end": 56.0, "words": []},
-        {"index": 9, "speaker": 1, "speaker_label": "Customer", "text": "Yes, I agree. Let's do it.", "start": 56.5, "end": 58.5, "words": []},
-        {"index": 10, "speaker": 0, "speaker_label": "Agent", "text": "Fantastic. And just so you know, you have a 10 business day cooling-off period during which you can cancel without penalty. I'll send all the plan details and your confirmation to sophie.t@gmail.com. Is there anything else I can help you with?", "start": 59.0, "end": 71.0, "words": []},
-        {"index": 11, "speaker": 1, "speaker_label": "Customer", "text": "No that's everything. Thanks Tom!", "start": 71.5, "end": 73.5, "words": []},
-        {"index": 12, "speaker": 0, "speaker_label": "Agent", "text": "You're welcome Sophie. Have a great day!", "start": 74.0, "end": 76.0, "words": []},
+        {"index": 0, "speaker": 0, "speaker_label": "Agent", "text": "Good afternoon, this is Tom calling from CIMET on behalf of Aussie Broadband. Just letting you know this call is being recorded for quality and compliance purposes. Am I speaking with Sophie?", "start": 0.0, "end": 7.8, "words": []},
+        {"index": 1, "speaker": 1, "speaker_label": "Customer", "text": "Yes, this is Sophie Taylor.", "start": 8.2, "end": 10.0, "words": []},
+        {"index": 2, "speaker": 0, "speaker_label": "Agent", "text": "Hi Sophie, thanks so much for taking the time to chat with me today. How's your afternoon going so far?", "start": 10.4, "end": 14.6, "words": []},
+        {"index": 3, "speaker": 1, "speaker_label": "Customer", "text": "Pretty good thanks, just working from home today.", "start": 15.0, "end": 17.5, "words": []},
+        {"index": 4, "speaker": 0, "speaker_label": "Agent", "text": "Nice, well I'll try not to keep you too long. Before we get into the details, can I please confirm your full name and the address where the service will be connected?", "start": 17.9, "end": 24.5, "words": []},
+        {"index": 5, "speaker": 1, "speaker_label": "Customer", "text": "Sure, it's Sophie Louise Taylor, and the address is 42 Harbour St, Sydney NSW 2000.", "start": 24.9, "end": 30.2, "words": []},
+        {"index": 6, "speaker": 0, "speaker_label": "Agent", "text": "Perfect, thank you Sophie, that matches what we have on file. I can also see your email on file is sophie.t@gmail.com — is that still the best email to reach you on?", "start": 30.6, "end": 38.0, "words": []},
+        {"index": 7, "speaker": 1, "speaker_label": "Customer", "text": "Yep, sophie.t@gmail.com is correct, that's still my main email.", "start": 38.4, "end": 41.8, "words": []},
+        {"index": 8, "speaker": 0, "speaker_label": "Agent", "text": "Great, thank you for confirming. Now, I've had a look at your address and the good news is you're on FTTP, that's fibre to the premises, which is the best NBN technology available and gives you the most stable and fastest possible connection.", "start": 42.2, "end": 52.5, "words": []},
+        {"index": 9, "speaker": 1, "speaker_label": "Customer", "text": "Oh that's good to hear, I've had issues with speed at my old place.", "start": 52.9, "end": 56.0, "words": []},
+        {"index": 10, "speaker": 0, "speaker_label": "Agent", "text": "I completely understand, that's really frustrating. Because you're on FTTP, I'd recommend the Aussie Broadband NBN 100 plan for you. That's the NBN 100 speed tier, and on FTTP you can typically expect an evening speed of around 90 Mbps, which is excellent for streaming, video calls, and working from home like you mentioned.", "start": 56.4, "end": 68.9, "words": []},
+        {"index": 11, "speaker": 1, "speaker_label": "Customer", "text": "That sounds like exactly what I need. What's the price on that?", "start": 69.3, "end": 72.5, "words": []},
+        {"index": 12, "speaker": 0, "speaker_label": "Agent", "text": "Of course. The Aussie Broadband NBN 100 plan is $79/month, no setup fees, and no hidden extras. And importantly, it's no lock-in, month-to-month, so there's no long-term contract keeping you tied in — you can cancel or change plans whenever suits you.", "start": 72.9, "end": 84.0, "words": []},
+        {"index": 13, "speaker": 1, "speaker_label": "Customer", "text": "That's really flexible, I like that. No lock-in makes it an easy decision.", "start": 84.4, "end": 88.2, "words": []},
+        {"index": 14, "speaker": 0, "speaker_label": "Agent", "text": "Absolutely, we find most customers appreciate that flexibility. Take your time though — is there anything you'd like me to clarify about the plan, the FTTP connection, or the pricing before we go any further?", "start": 88.6, "end": 96.5, "words": []},
+        {"index": 15, "speaker": 1, "speaker_label": "Customer", "text": "No, I think you've covered it all. I'm happy to go ahead.", "start": 96.9, "end": 100.0, "words": []},
+        {"index": 16, "speaker": 0, "speaker_label": "Agent", "text": "Wonderful, no pressure at all either way, but glad it suits you. So, based on what we've discussed, do you agree to sign up for this Aussie Broadband plan? I need a clear yes to proceed.", "start": 100.4, "end": 108.5, "words": []},
+        {"index": 17, "speaker": 1, "speaker_label": "Customer", "text": "Yes, I agree, let's go ahead with it.", "start": 108.9, "end": 111.2, "words": []},
+        {"index": 18, "speaker": 0, "speaker_label": "Agent", "text": "Fantastic, thank you Sophie. Just one more important thing to cover — you have a 10 business day cooling-off period during which you can cancel without penalty, so there's absolutely no risk in trying it out. I'll send a confirmation with all the plan details, the $79/month price, the NBN 100 speed tier, and your FTTP connection details to sophie.t@gmail.com shortly.", "start": 111.6, "end": 126.0, "words": []},
+        {"index": 19, "speaker": 1, "speaker_label": "Customer", "text": "That's great, thank you for explaining everything so clearly.", "start": 126.4, "end": 129.0, "words": []},
+        {"index": 20, "speaker": 0, "speaker_label": "Agent", "text": "It's my pleasure, Sophie. Is there anything else at all I can help you with today?", "start": 129.4, "end": 132.5, "words": []},
+        {"index": 21, "speaker": 1, "speaker_label": "Customer", "text": "No, that covers everything. Thanks so much, Tom.", "start": 132.9, "end": 135.2, "words": []},
+        {"index": 22, "speaker": 0, "speaker_label": "Agent", "text": "You're very welcome. Thanks again for your time today, Sophie, and welcome to Aussie Broadband. Have a wonderful afternoon!", "start": 135.6, "end": 140.5, "words": []},
+        {"index": 23, "speaker": 1, "speaker_label": "Customer", "text": "You too, bye!", "start": 140.9, "end": 142.0, "words": []},
     ]
 
     # Lead 5: Aussie Broadband — wrong speed, missing tech type — should FAIL

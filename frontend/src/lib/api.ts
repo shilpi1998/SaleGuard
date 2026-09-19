@@ -23,6 +23,16 @@ export const getLeads = (params?: Record<string, string>) => {
   const qs = params ? "?" + new URLSearchParams(params).toString() : "";
   return fetchApi<import("./types").LeadListItem[]>(`/leads${qs}`);
 };
+
+// Held leads awaiting review (comma-separated gate_decision filter)
+export const HELD_GATE_DECISIONS = [
+  "held_critical_fail",
+  "held_low_confidence",
+  "held_random_sample",
+] as const;
+
+export const getReviewQueue = () =>
+  getLeads({ gate_decision: HELD_GATE_DECISIONS.join(",") });
 export const getLead = (id: number) => fetchApi<import("./types").Lead>(`/leads/${id}`);
 export const createLead = (data: any) => fetchApi<import("./types").Lead>("/leads/", { method: "POST", body: JSON.stringify(data) });
 
@@ -76,6 +86,18 @@ export const getGateDistribution = (params?: Record<string, string>) => {
   return fetchApi<import("./types").GateDistribution[]>(`/dashboard/gate-distribution${qs}`);
 };
 export const getRetailers = () => fetchApi<import("./types").Retailer[]>("/dashboard/retailers");
+export const getAgentPerformance = (params?: Record<string, string>) => {
+  const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+  return fetchApi<import("./types").AgentPerformance[]>(`/dashboard/agent-performance${qs}`);
+};
+export const getBreakdown = (groupBy: "campaign" | "site" | "team_leader", params?: Record<string, string>) => {
+  const qs = new URLSearchParams({ ...params, group_by: groupBy }).toString();
+  return fetchApi<import("./types").DimensionBreakdown[]>(`/dashboard/breakdown?${qs}`);
+};
+export const getAuditorAgreement = (params?: Record<string, string>) => {
+  const qs = params ? "?" + new URLSearchParams(params).toString() : "";
+  return fetchApi<import("./types").AuditorAgreement>(`/dashboard/auditor-agreement${qs}`);
+};
 
 // Overrides
 export const createOverride = (scoreResultId: number, data: { new_result: string; overridden_by: string; reason: string }) =>

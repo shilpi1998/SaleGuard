@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,11 @@ import {
   Pencil,
   Trash2,
   X,
+  ShieldAlert,
+  ChevronDown,
+  ChevronRight,
+  AlertTriangle,
+  Undo2,
 } from "lucide-react";
 import {
   getAdminRetailers,
@@ -37,8 +42,20 @@ import {
   getLead,
   createAdminLead,
   updateLead,
+  getReviewQueue,
+  getScorecard,
+  createOverride,
 } from "@/lib/api";
-import type { Retailer, Agent, Check, LeadListItem, Lead } from "@/lib/types";
+import type {
+  Retailer,
+  Agent,
+  Check,
+  LeadListItem,
+  Lead,
+  Scorecard,
+  ScoreResult,
+  Override,
+} from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Shared bits
@@ -99,6 +116,526 @@ function Banner({
 function FieldLabel({ children }: { children: React.ReactNode }) {
   return (
     <label className="text-sm font-medium text-muted-foreground">{children}</label>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Review Queue tab
+// ---------------------------------------------------------------------------
+
+const GATE_DECISION_BADGE: Record<string, string> = {
+  held_critical_fail:
+    "bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800",
+  held_low_confidence:
+    "bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-300 dark:border-yellow-800",
+  held_random_sample:
+    "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800",
+};
+
+const GATE_DECISION_LABEL: Record<string, string> = {
+  held_critical_fail: "Critical Fail",
+  held_low_confidence: "Low Confidence",
+  held_random_sample: "Random Sample",
+};
+
+function GateDecisionBadge({ decision }: { decision: string }) {
+  const cls =
+    GATE_DECISION_BADGE[decision] ||
+    "bg-muted text-muted-foreground border-border";
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${cls}`}
+    >
+      {GATE_DECISION_LABEL[decision] || decision}
+    </span>
+  );
+}
+
+// Human review workflow status for a held lead. Distinct from the check-level
+// PASS/FAIL "Override" — this tracks where the admin/auditor is at with the lead
+// as a whole.
+const STATUS_OPTIONS = [
+  { value: "acknowledged", label: "Acknowledged" },
+  { value: "discussing_with_customer", label: "Discussing with Customer" },
+  { value: "checking_crm", label: "Checking CRM" },
+  { value: "approved", label: "Approved" },
+  { value: "rejected", label: "Rejected" },
+] as const;
+
+const STATUS_LABEL: Record<string, string> = STATUS_OPTIONS.reduce(
+  (acc, opt) => {
+    acc[opt.value] = opt.label;
+    return acc;
+  },
+  {} as Record<string, string>
+);
+
+const STATUS_BADGE_STYLES: Record<string, string> = {
+  acknowledged:
+    "bg-slate-100 text-slate-800 border-slate-200 dark:bg-slate-800/40 dark:text-slate-300 dark:border-slate-700",
+  discussing_with_customer:
+    "bg-purple-100 text-purple-800 border-purple-200 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-800",
+  checking_crm:
+    "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800",
+  approved:
+    "bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-300 dark:border-green-800",
+  rejected:
+    "bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800",
+};
+
+function StatusBadge({ status }: { status: string }) {
+  const cls =
+    STATUS_BADGE_STYLES[status] || "bg-muted text-muted-foreground border-border";
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${cls}`}
+    >
+      {STATUS_LABEL[status] || status}
+    </span>
+  );
+}
+
+const CHECK_TYPE_LABEL: Record<string, string> = {
+  A_VERBATIM: "Verbatim",
+  B_FACTUAL: "Factual",
+  C_BEHAVIOUR: "Behavioural",
+};
+
+function CheckTypeBadge({ type }: { type: string }) {
+  return <Badge variant="outline">{CHECK_TYPE_LABEL[type] || type}</Badge>;
+}
+
+function ResultBadge({
+  result,
+  overridden,
+}: {
+  result: string;
+  overridden?: boolean;
+}) {
+  const cls =
+    result === "PASS"
+      ? "bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-300 dark:border-green-800"
+      : result === "FAIL"
+        ? "bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800"
+        : "bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-300 dark:border-yellow-800";
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${cls}`}
+    >
+      {result}
+      {overridden && (
+        <span className="flex items-center gap-0.5 text-[10px] font-normal opacity-80">
+          <Undo2 className="h-3 w-3" />
+          overridden
+        </span>
+      )}
+    </span>
+  );
+}
+
+function ConfidenceBar({ confidence }: { confidence: number }) {
+  const pct = Math.round(confidence * 100);
+  const barColor =
+    pct >= 80 ? "bg-green-500" : pct >= 50 ? "bg-yellow-500" : "bg-red-500";
+  return (
+    <div className="flex items-center gap-2">
+      <div className="h-1.5 w-20 overflow-hidden rounded-full bg-muted">
+        <div className={`h-full ${barColor}`} style={{ width: `${pct}%` }} />
+      </div>
+      <span className="text-xs text-muted-foreground">{pct}%</span>
+    </div>
+  );
+}
+
+interface OverrideFormState {
+  new_result: "PASS" | "NOTE";
+  overridden_by: string;
+  reason: string;
+}
+
+const emptyOverrideForm = (): OverrideFormState => ({
+  new_result: "PASS",
+  overridden_by: "",
+  reason: "",
+});
+
+function OverrideAuditEntry({ override }: { override: Override }) {
+  return (
+    <div className="flex items-start gap-2 rounded border border-dashed border-muted-foreground/30 bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground">
+      <Undo2 className="mt-0.5 h-3 w-3 shrink-0" />
+      <span>
+        Overridden to <span className="font-semibold text-foreground">{override.new_result}</span> by{" "}
+        <span className="font-medium text-foreground">{override.overridden_by}</span> —{" "}
+        {override.reason} —{" "}
+        {new Date(override.created_at).toLocaleString()}
+      </span>
+    </div>
+  );
+}
+
+function CheckResultRow({
+  result,
+  onOverridden,
+}: {
+  result: ScoreResult;
+  onOverridden: (resultId: number, override: Override) => void;
+}) {
+  const [formOpen, setFormOpen] = useState(false);
+  const [form, setForm] = useState<OverrideFormState>(emptyOverrideForm());
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const overrides = result.overrides || [];
+  const hasOverride = overrides.length > 0;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.overridden_by.trim() || !form.reason.trim()) {
+      setError("Overridden By and Reason are required.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const override = await createOverride(result.id, {
+        new_result: form.new_result,
+        overridden_by: form.overridden_by.trim(),
+        reason: form.reason.trim(),
+      });
+      onOverridden(result.id, override);
+      setFormOpen(false);
+      setForm(emptyOverrideForm());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save override");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2 border-b py-3 last:border-b-0">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium">{result.check?.name || `Check #${result.check_id}`}</span>
+            {result.check && <CheckTypeBadge type={result.check.check_type} />}
+            {result.check?.is_critical && <Badge variant="destructive">CRITICAL</Badge>}
+            <ResultBadge result={result.result} overridden={hasOverride} />
+          </div>
+          <ConfidenceBar confidence={result.confidence} />
+          {result.evidence_text && (
+            <p className="text-xs text-muted-foreground">
+              <span className="font-medium text-foreground/70">Evidence: </span>
+              {result.evidence_text.length > 220
+                ? `${result.evidence_text.slice(0, 220)}…`
+                : result.evidence_text}
+            </p>
+          )}
+          {result.reasoning && (
+            <p className="text-xs text-muted-foreground">
+              <span className="font-medium text-foreground/70">Reasoning: </span>
+              {result.reasoning}
+            </p>
+          )}
+        </div>
+        {result.result === "FAIL" && !formOpen && (
+          <Button variant="outline" size="sm" onClick={() => setFormOpen(true)}>
+            <Pencil className="h-3.5 w-3.5" />
+            Override
+          </Button>
+        )}
+      </div>
+
+      {overrides.map((ov) => (
+        <OverrideAuditEntry key={ov.id} override={ov} />
+      ))}
+
+      {formOpen && (
+        <form
+          onSubmit={handleSubmit}
+          className="space-y-3 rounded border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20"
+        >
+          <div className="flex items-center gap-2 text-sm font-medium text-amber-800 dark:text-amber-300">
+            <AlertTriangle className="h-4 w-4" />
+            Overriding a failed check is logged permanently in the audit trail.
+          </div>
+          {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="space-y-1">
+              <FieldLabel>New Result *</FieldLabel>
+              <select
+                value={form.new_result}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, new_result: e.target.value as "PASS" | "NOTE" }))
+                }
+                className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm"
+              >
+                <option value="PASS">PASS</option>
+                <option value="NOTE">NOTE</option>
+              </select>
+            </div>
+            <div className="space-y-1 sm:col-span-2">
+              <FieldLabel>Overridden By *</FieldLabel>
+              <Input
+                value={form.overridden_by}
+                onChange={(e) => setForm((f) => ({ ...f, overridden_by: e.target.value }))}
+                placeholder="Your name"
+              />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <FieldLabel>Reason *</FieldLabel>
+            <Textarea
+              value={form.reason}
+              onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))}
+              placeholder="Explain why this check result is being overridden..."
+              className="min-h-20"
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setFormOpen(false);
+                setError(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" size="sm" disabled={saving}>
+              {saving ? "Submitting..." : "Submit Override"}
+            </Button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
+function ReviewQueueDetail({ leadId }: { leadId: number }) {
+  const [scorecard, setScorecard] = useState<Scorecard | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    getScorecard(leadId)
+      .then(setScorecard)
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load scorecard"))
+      .finally(() => setLoading(false));
+  }, [leadId]);
+
+  const handleOverridden = (resultId: number, override: Override) => {
+    setScorecard((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        results: prev.results.map((r) =>
+          r.id === resultId
+            ? {
+                ...r,
+                result: override.new_result as ScoreResult["result"],
+                overrides: [...(r.overrides || []), override],
+              }
+            : r
+        ),
+      };
+    });
+  };
+
+  if (loading) {
+    return <p className="p-4 text-sm text-muted-foreground">Loading check results...</p>;
+  }
+  if (error) {
+    return <p className="p-4 text-sm text-red-600 dark:text-red-400">{error}</p>;
+  }
+  if (!scorecard || scorecard.results.length === 0) {
+    return <p className="p-4 text-sm text-muted-foreground">No check results found for this lead.</p>;
+  }
+
+  return (
+    <div className="space-y-1 p-4">
+      {scorecard.results.map((result) => (
+        <CheckResultRow key={result.id} result={result} onOverridden={handleOverridden} />
+      ))}
+    </div>
+  );
+}
+
+function ReviewQueueTab() {
+  const [leads, setLeads] = useState<LeadListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [expandedLeadId, setExpandedLeadId] = useState<number | null>(null);
+  const [statusUpdatingId, setStatusUpdatingId] = useState<number | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    getReviewQueue()
+      .then(setLeads)
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load review queue"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const toggleExpanded = (id: number) => {
+    setExpandedLeadId((prev) => (prev === id ? null : id));
+  };
+
+  const handleStatusChange = async (leadId: number, newStatus: string) => {
+    const previous = leads.find((l) => l.id === leadId)?.status;
+    // Optimistically update the UI immediately.
+    setLeads((prev) =>
+      prev.map((l) => (l.id === leadId ? { ...l, status: newStatus } : l))
+    );
+    setStatusUpdatingId(leadId);
+    setError(null);
+    try {
+      await updateLead(leadId, { status: newStatus });
+    } catch (err) {
+      // Roll back on failure.
+      setLeads((prev) =>
+        prev.map((l) =>
+          l.id === leadId ? { ...l, status: previous ?? l.status } : l
+        )
+      );
+      setError(err instanceof Error ? err.message : "Failed to update status");
+    } finally {
+      setStatusUpdatingId(null);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {error && <Banner type="error" message={error} onDismiss={() => setError(null)} />}
+
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          Leads that were held by the scoring gate (critical fail, low confidence, or random
+          sample). Review the individual check results and override where appropriate — every
+          override is permanently logged.
+        </p>
+        <Button variant="outline" size="sm" onClick={load}>
+          Refresh
+        </Button>
+      </div>
+
+      <Card>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[36px]" />
+                <TableHead>Lead ID</TableHead>
+                <TableHead>Customer</TableHead>
+                <TableHead>Retailer</TableHead>
+                <TableHead>Gate Decision</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Score</TableHead>
+                <TableHead>Date</TableHead>
+                <TableHead className="w-[220px]">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {leads.map((lead) => (
+                <Fragment key={lead.id}>
+                  <TableRow>
+                    <TableCell>
+                      <button
+                        type="button"
+                        onClick={() => toggleExpanded(lead.id)}
+                        className="text-muted-foreground hover:text-foreground"
+                        aria-label="Toggle review detail"
+                      >
+                        {expandedLeadId === lead.id ? (
+                          <ChevronDown className="h-4 w-4" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4" />
+                        )}
+                      </button>
+                    </TableCell>
+                    <TableCell className="font-medium">{lead.external_id}</TableCell>
+                    <TableCell>{lead.customer_name || "—"}</TableCell>
+                    <TableCell>{lead.retailer_name || "—"}</TableCell>
+                    <TableCell>
+                      {lead.gate_decision ? (
+                        <GateDecisionBadge decision={lead.gate_decision} />
+                      ) : (
+                        "—"
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {STATUS_LABEL[lead.status] ? (
+                        <StatusBadge status={lead.status} />
+                      ) : (
+                        <Badge variant="outline">{lead.status}</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {lead.weighted_score != null
+                        ? `${Math.round(lead.weighted_score * 100)}%`
+                        : "—"}
+                    </TableCell>
+                    <TableCell>{new Date(lead.sale_date).toLocaleDateString()}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Button variant="ghost" size="sm" onClick={() => toggleExpanded(lead.id)}>
+                          <ShieldAlert className="h-3.5 w-3.5" />
+                          Review
+                        </Button>
+                        <select
+                          value={STATUS_LABEL[lead.status] ? lead.status : ""}
+                          onChange={(e) => handleStatusChange(lead.id, e.target.value)}
+                          disabled={statusUpdatingId === lead.id}
+                          aria-label="Update lead status"
+                          className="h-8 rounded-lg border border-input bg-background px-2 text-xs disabled:opacity-50"
+                        >
+                          <option value="" disabled>
+                            Update status…
+                          </option>
+                          {STATUS_OPTIONS.map((opt) => (
+                            <option key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                  {expandedLeadId === lead.id && (
+                    <TableRow>
+                      <TableCell colSpan={9} className="bg-muted/30 p-0">
+                        <ReviewQueueDetail leadId={lead.id} />
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </Fragment>
+              ))}
+              {!loading && leads.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                    No leads are currently held for review. All clear!
+                  </TableCell>
+                </TableRow>
+              )}
+              {loading && (
+                <TableRow>
+                  <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                    Loading review queue...
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
@@ -1110,8 +1647,12 @@ export default function AdminPage() {
         </p>
       </div>
 
-      <Tabs defaultValue="retailers">
+      <Tabs defaultValue="review-queue">
         <TabsList>
+          <TabsTrigger value="review-queue">
+            <ShieldAlert className="h-4 w-4" />
+            Review Queue
+          </TabsTrigger>
           <TabsTrigger value="retailers">
             <Building2 className="h-4 w-4" />
             Retailers
@@ -1126,6 +1667,9 @@ export default function AdminPage() {
           </TabsTrigger>
         </TabsList>
 
+        <TabsContent value="review-queue" className="pt-4">
+          <ReviewQueueTab />
+        </TabsContent>
         <TabsContent value="retailers" className="pt-4">
           <RetailersTab onChange={refreshRetailers} />
         </TabsContent>

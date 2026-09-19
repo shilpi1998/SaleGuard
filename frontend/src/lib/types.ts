@@ -111,6 +111,7 @@ export interface ScoreResult {
   latency_ms: number | null;
   created_at: string;
   check?: Check;
+  overrides?: Override[];
 }
 
 export interface Scorecard {
@@ -140,6 +141,7 @@ export interface DashboardSummary {
   critical_fail_rate: number;
   first_pass_yield: number;
   avg_weighted_score: number;
+  avg_weighted_score_excl_fatal: number;
   avg_confidence: number;
 }
 
@@ -176,4 +178,37 @@ export interface Override {
   overridden_by: string;
   reason: string;
   created_at: string;
+}
+
+export interface AgentPerformance {
+  agent_id: number;
+  agent_name: string;
+  employee_id: string;
+  site: string | null;
+  team_leader_name: string | null;
+  leads_scored: number;
+  passed: number;
+  failed: number;
+  pass_rate: number;
+  critical_fail_count: number;
+  critical_fail_rate: number;
+  avg_weighted_score: number;
+  avg_weighted_score_excl_fatal: number;
+}
+
+export interface DimensionBreakdown {
+  group_name: string;
+  leads_scored: number;
+  passed: number;
+  failed: number;
+  pass_rate: number;
+  critical_fail_rate: number;
+  avg_weighted_score: number;
+}
+
+export interface AuditorAgreement {
+  total_overrides: number;
+  fail_to_pass_count: number;
+  fail_to_note_count: number;
+  agreement_rate: number;
 }

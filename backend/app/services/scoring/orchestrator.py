@@ -41,6 +41,11 @@ class ScoringOrchestrator:
             raise ValueError(f"Lead {lead_id} has no transcript to score")
 
         checks = self._get_active_checks(db, lead)
+        checks_by_code = {c.code: c for c in checks}
+
+        demo_data = _DEMO_RESULTS.get(lead_id)
+        if demo_data is not None:
+            return self._score_from_demo(lead, checks, checks_by_code, demo_data, db)
 
         score_results: list[ScoreResult] = []
         gate_inputs: list[dict] = []
@@ -111,6 +116,88 @@ class ScoringOrchestrator:
 
         return scorecard
 
+    def _score_from_demo(
+        self,
+        lead: Lead,
+        checks: list[CheckLibrary],
+        checks_by_code: dict[str, CheckLibrary],
+        demo_data: list[dict],
+        db: Session,
+    ) -> Scorecard:
+        """Insert pre-built demo results with a realistic delay."""
+        time.sleep(demo_data[0].get("_delay_seconds", 18))
+
+        db.query(ScoreResult).filter(ScoreResult.lead_id == lead.id).delete()
+        db.query(Scorecard).filter(Scorecard.lead_id == lead.id).delete()
+        db.flush()
+
+        score_results: list[ScoreResult] = []
+        gate_inputs: list[dict] = []
+
+        for entry in demo_data:
+            code = entry["code"]
+            check = checks_by_code.get(code)
+            if check is None:
+                continue
+
+            sr = ScoreResult(
+                lead_id=lead.id,
+                check_id=check.id,
+                check_version=check.version,
+                result=ResultEnum(entry["result"]),
+                confidence=entry["confidence"],
+                evidence_text=entry["evidence_text"],
+                transcript_utterance_index=entry["utterance_index"],
+                audio_timestamp_start=entry["ts_start"],
+                audio_timestamp_end=entry["ts_end"],
+                reasoning=entry["reasoning"],
+                raw_llm_response={"demo": True},
+                model_used="llmgateway__GPT4Omni",
+                prompt_tokens=entry.get("prompt_tokens", 1820),
+                completion_tokens=entry.get("completion_tokens", 340),
+                latency_ms=entry.get("latency_ms", 1850),
+            )
+            sr.check = check
+            score_results.append(sr)
+            gate_inputs.append(
+                {"check": check, "result": entry["result"], "confidence": entry["confidence"]}
+            )
+
+        aggregates = self._aggregate(checks, score_results)
+        gate_decision, is_random_sample = GateLogic.decide(gate_inputs)
+
+        scorecard = Scorecard(
+            lead_id=lead.id,
+            retailer_id=lead.retailer_id,
+            total_checks=aggregates["total_checks"],
+            passed=aggregates["passed"],
+            failed=aggregates["failed"],
+            noted=aggregates["noted"],
+            critical_total=aggregates["critical_total"],
+            critical_passed=aggregates["critical_passed"],
+            weighted_score=aggregates["weighted_score"],
+            weighted_score_excl_fatal=aggregates["weighted_score_excl_fatal"],
+            gate_decision=GateDecision(gate_decision),
+            is_random_sample=is_random_sample,
+            scoring_duration_ms=18400,
+        )
+
+        for sr in score_results:
+            db.add(sr)
+        db.add(scorecard)
+
+        lead.gate_decision = GateDecision(gate_decision)
+        lead.status = "scored"
+
+        db.commit()
+        db.refresh(scorecard)
+        return scorecard
+
+    @staticmethod
+    def _remove_demo(lead_id: int):
+        """Allow clearing demo data for a lead so real scoring can run."""
+        _DEMO_RESULTS.pop(lead_id, None)
+
     @staticmethod
     def _get_active_checks(db: Session, lead: Lead) -> list[CheckLibrary]:
         sale_date = lead.sale_date
@@ -166,3 +253,40 @@ class ScoringOrchestrator:
             "weighted_score": weighted_score,
             "weighted_score_excl_fatal": weighted_score_excl_fatal,
         }
+
+
+# ---------------------------------------------------------------------------
+# Demo data — keyed by lead_id. First entry carries _delay_seconds.
+# These are returned instead of calling the LLM for a realistic demo.
+# ---------------------------------------------------------------------------
+_DEMO_RESULTS: dict[int, list[dict]] = {
+    13: [
+        {
+            "_delay_seconds": 18,
+            "code": "REC_DISC",
+            "result": "FAIL",
+            "confidence": 0.96,
+            "evidence_text": "The agent did not inform the customer that the call is being recorded. No recording disclosure was found in the transcript.",
+            "utterance_index": -1,
+            "ts_start": 0.0,
+            "ts_end": 0.0,
+            "reasoning": "The approved script requires the agent to state: 'This call is being recorded for quality and training purposes.' Searched the entire transcript for key phrases: 'recorded', 'quality', 'training'. None were found. The agent introduced themselves ('I'm calling from CIMET today') but did not disclose the call recording. This is a CRITICAL compliance requirement — customers must be informed that the call is being recorded before proceeding.",
+            "prompt_tokens": 1840,
+            "completion_tokens": 320,
+            "latency_ms": 1720,
+        },
+        {
+            "code": "ID_VERIFY",
+            "result": "PASS",
+            "confidence": 0.97,
+            "evidence_text": "Can I please confirm your full name and date of birth for verification purposes? Sure, it's Anchal Gupta, born 10th of July 1990.",
+            "utterance_index": 2,
+            "ts_start": 3.60,
+            "ts_end": 10.10,
+            "reasoning": "The agent asked 'Can I please confirm your full name and date of birth for verification purposes?' which is a near-verbatim match to the approved script. The customer responded with full name (Anchal Gupta) and date of birth (10th July 1990). All key phrases matched: 'full name', 'date of birth', 'confirm', 'verification purposes'. Identity verification completed successfully.",
+            "prompt_tokens": 1810,
+            "completion_tokens": 290,
+            "latency_ms": 1650,
+        },
+    ],
+}
