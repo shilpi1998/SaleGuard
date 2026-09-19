@@ -1,0 +1,27 @@
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+
+# Python
+backend/venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Node
+node_modules/
+frontend/.next/
+frontend/out/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Uploads
+backend/uploads/
+
+# OS
+.DS_Store
+Thumbs.db
