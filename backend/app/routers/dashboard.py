@@ -118,6 +118,7 @@ def get_critical_fails(
         key = (check.check_type.value, retailer.name, check.code)
         if key not in breakdown:
             breakdown[key] = {
+                "check_id": check.id,
                 "check_code": check.code,
                 "check_name": check.name,
                 "check_type": check.check_type.value,
@@ -135,6 +136,7 @@ def get_critical_fails(
         fail_rate = entry["fail_count"] / total if total else 0.0
         results.append(
             schemas.CriticalFailBreakdown(
+                check_id=entry["check_id"],
                 check_code=entry["check_code"],
                 check_name=entry["check_name"],
                 check_type=entry["check_type"],

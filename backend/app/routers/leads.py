@@ -84,6 +84,7 @@ def list_leads(
                 sale_date=lead.sale_date,
                 status=lead.status,
                 gate_decision=lead.gate_decision,
+                status_comment=lead.status_comment,
                 weighted_score=weighted_score,
                 created_at=lead.created_at,
             )

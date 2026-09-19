@@ -55,7 +55,9 @@ import {
   ArrowDown,
   Gauge,
   Scale,
+  ExternalLink,
 } from "lucide-react";
+import Link from "next/link";
 
 const GATE_COLORS: Record<string, string> = {
   auto_submit: "#22c55e",
@@ -848,6 +850,7 @@ export default function DashboardPage() {
                       <TableHead className="text-right">Total</TableHead>
                       <TableHead className="text-right">Fail Rate</TableHead>
                       <TableHead className="w-[160px]">Rate</TableHead>
+                      <TableHead className="text-center">Config</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -876,6 +879,15 @@ export default function DashboardPage() {
                                 style={{ width: `${cf.fail_rate * 100}%` }}
                               />
                             </div>
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <Link
+                              href={`/checks?highlight=${cf.check_id}`}
+                              className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+                            >
+                              <ExternalLink className="h-3.5 w-3.5" />
+                              View Config
+                            </Link>
                           </TableCell>
                         </TableRow>
                       );

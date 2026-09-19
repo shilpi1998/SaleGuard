@@ -16,6 +16,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Building2,
   ListChecks,
   Users,
@@ -471,6 +479,8 @@ function ReviewQueueTab() {
   const [error, setError] = useState<string | null>(null);
   const [expandedLeadId, setExpandedLeadId] = useState<number | null>(null);
   const [statusUpdatingId, setStatusUpdatingId] = useState<number | null>(null);
+  const [commentDialog, setCommentDialog] = useState<{ leadId: number; newStatus: string } | null>(null);
+  const [commentText, setCommentText] = useState("");
 
   const load = useCallback(() => {
     setLoading(true);
@@ -488,21 +498,32 @@ function ReviewQueueTab() {
     setExpandedLeadId((prev) => (prev === id ? null : id));
   };
 
-  const handleStatusChange = async (leadId: number, newStatus: string) => {
-    const previous = leads.find((l) => l.id === leadId)?.status;
-    // Optimistically update the UI immediately.
+  const handleStatusChange = (leadId: number, newStatus: string) => {
+    setCommentText("");
+    setCommentDialog({ leadId, newStatus });
+  };
+
+  const submitStatusChange = async () => {
+    if (!commentDialog) return;
+    const { leadId, newStatus } = commentDialog;
+    const comment = commentText.trim();
+
+    setCommentDialog(null);
+
+    const previous = leads.find((l) => l.id === leadId);
     setLeads((prev) =>
-      prev.map((l) => (l.id === leadId ? { ...l, status: newStatus } : l))
+      prev.map((l) => (l.id === leadId ? { ...l, status: newStatus, status_comment: comment || l.status_comment } : l))
     );
     setStatusUpdatingId(leadId);
     setError(null);
     try {
-      await updateLead(leadId, { status: newStatus });
+      const payload: Record<string, string> = { status: newStatus };
+      if (comment) payload.status_comment = comment;
+      await updateLead(leadId, payload);
     } catch (err) {
-      // Roll back on failure.
       setLeads((prev) =>
         prev.map((l) =>
-          l.id === leadId ? { ...l, status: previous ?? l.status } : l
+          l.id === leadId ? { ...l, status: previous?.status ?? l.status, status_comment: previous?.status_comment ?? l.status_comment } : l
         )
       );
       setError(err instanceof Error ? err.message : "Failed to update status");
@@ -635,6 +656,33 @@ function ReviewQueueTab() {
           </Table>
         </CardContent>
       </Card>
+
+      <Dialog open={!!commentDialog} onOpenChange={(open) => { if (!open) setCommentDialog(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              Update Status to {commentDialog ? STATUS_LABEL[commentDialog.newStatus] || commentDialog.newStatus : ""}
+            </DialogTitle>
+            <DialogDescription>
+              Add an optional comment explaining why you are setting this status.
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            placeholder="Add your comment here..."
+            value={commentText}
+            onChange={(e) => setCommentText(e.target.value)}
+            rows={3}
+          />
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setCommentDialog(null)}>
+              Cancel
+            </Button>
+            <Button onClick={submitStatusChange}>
+              Confirm
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

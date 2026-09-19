@@ -73,6 +73,7 @@ class LeadUpdate(BaseModel):
     sale_date: date | None = None
     crm_data: dict | None = None
     status: str | None = None
+    status_comment: str | None = None
 
 
 class LeadOut(BaseModel):
@@ -88,6 +89,7 @@ class LeadOut(BaseModel):
     crm_data: dict | None
     status: str
     gate_decision: str | None
+    status_comment: str | None = None
     created_at: datetime
     updated_at: datetime
     retailer: RetailerOut | None = None
@@ -105,6 +107,7 @@ class LeadListOut(BaseModel):
     sale_date: date
     status: str
     gate_decision: str | None
+    status_comment: str | None = None
     weighted_score: float | None = None
     created_at: datetime
 
@@ -292,6 +295,7 @@ class DashboardSummary(BaseModel):
 
 
 class CriticalFailBreakdown(BaseModel):
+    check_id: int
     check_code: str
     check_name: str
     check_type: str

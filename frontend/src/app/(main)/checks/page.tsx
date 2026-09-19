@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -228,12 +229,12 @@ function EvaluationConfigDetails({ check }: { check: Check }) {
   );
 }
 
-function CheckCard({ check, expanded, onToggle }: { check: Check; expanded: boolean; onToggle: () => void }) {
+function CheckCard({ check, expanded, onToggle, highlight }: { check: Check; expanded: boolean; onToggle: () => void; highlight?: boolean }) {
   const meta = typeMeta(check.check_type);
   const Icon = meta.icon;
 
   return (
-    <Card className={`overflow-hidden ${meta.border}`}>
+    <Card id={`check-${check.id}`} className={`overflow-hidden ${meta.border} ${highlight ? "ring-2 ring-blue-500 ring-offset-2" : ""}`}>
       <button
         type="button"
         onClick={onToggle}
@@ -291,6 +292,10 @@ function CheckCard({ check, expanded, onToggle }: { check: Check; expanded: bool
 }
 
 export default function ChecksPage() {
+  const searchParams = useSearchParams();
+  const highlightId = searchParams.get("highlight") ? Number(searchParams.get("highlight")) : null;
+  const highlightHandled = useRef(false);
+
   const [retailers, setRetailers] = useState<Retailer[]>([]);
   const [selectedRetailerId, setSelectedRetailerId] = useState<number | null>(null);
   const [checks, setChecks] = useState<Check[]>([]);
@@ -312,14 +317,38 @@ export default function ChecksPage() {
     setChecksLoading(true);
     setExpandedIds(new Set());
     getChecks(retailerId)
-      .then(setChecks)
+      .then((loaded) => {
+        setChecks(loaded);
+        if (highlightId && !highlightHandled.current) {
+          const found = loaded.find((c) => c.id === highlightId);
+          if (found) {
+            highlightHandled.current = true;
+            setExpandedIds(new Set([found.id]));
+            setTimeout(() => {
+              document.getElementById(`check-${found.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+            }, 100);
+          }
+        }
+      })
       .catch(console.error)
       .finally(() => setChecksLoading(false));
-  }, []);
+  }, [highlightId]);
 
   useEffect(() => {
     if (selectedRetailerId != null) loadChecks(selectedRetailerId);
   }, [selectedRetailerId, loadChecks]);
+
+  useEffect(() => {
+    if (highlightId && retailers.length > 0 && !highlightHandled.current) {
+      for (const r of retailers) {
+        getChecks(r.id).then((rChecks) => {
+          if (rChecks.some((c) => c.id === highlightId)) {
+            setSelectedRetailerId(r.id);
+          }
+        }).catch(() => {});
+      }
+    }
+  }, [highlightId, retailers]);
 
   const toggleExpanded = (id: number) => {
     setExpandedIds((prev) => {
@@ -436,6 +465,7 @@ export default function ChecksPage() {
               check={check}
               expanded={expandedIds.has(check.id)}
               onToggle={() => toggleExpanded(check.id)}
+              highlight={check.id === highlightId}
             />
           ))}
         </div>

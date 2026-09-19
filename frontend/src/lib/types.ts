@@ -29,6 +29,7 @@ export interface Lead {
   crm_data: Record<string, any> | null;
   status: string;
   gate_decision: string | null;
+  status_comment: string | null;
   created_at: string;
   updated_at: string;
   retailer?: Retailer;
@@ -44,6 +45,7 @@ export interface LeadListItem {
   sale_date: string;
   status: string;
   gate_decision: string | null;
+  status_comment: string | null;
   weighted_score: number | null;
   created_at: string;
 }
@@ -146,6 +148,7 @@ export interface DashboardSummary {
 }
 
 export interface CriticalFailBreakdown {
+  check_id: number;
   check_code: string;
   check_name: string;
   check_type: string;

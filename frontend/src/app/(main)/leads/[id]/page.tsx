@@ -25,7 +25,7 @@ import {
   processLead,
 } from "@/lib/api";
 import type { Lead, Scorecard, Transcript, ScoreResult, Recording } from "@/lib/types";
-import { FileText, Play, Pause, Volume2, CheckCircle, XCircle, AlertTriangle, ShieldAlert, Clock, MessageSquareQuote, Mic, Square, Trash2, AudioLines, UserCheck, Undo2 } from "lucide-react";
+import { FileText, Play, Pause, Volume2, CheckCircle, XCircle, AlertTriangle, ShieldAlert, Clock, MessageSquare, MessageSquareQuote, Mic, Square, Trash2, AudioLines, UserCheck, Undo2 } from "lucide-react";
 
 function resultColor(result: string) {
   switch (result) {
@@ -552,7 +552,17 @@ export default function ScorecardPage() {
               </div>
             )}
 
-            {lead.status === "approved" && scorecard.failed > 0 && allOverrides.length === 0 && (
+            {lead.status_comment && (
+              <div className="mt-3 border-t border-current/15 pt-3">
+                <p className="text-sm font-semibold flex items-center gap-1.5">
+                  <MessageSquare className="h-4 w-4" />
+                  Auditor Comment
+                </p>
+                <p className="text-sm opacity-90 mt-1 italic">&ldquo;{lead.status_comment}&rdquo;</p>
+              </div>
+            )}
+
+            {lead.status === "approved" && scorecard.failed > 0 && allOverrides.length === 0 && !lead.status_comment && (
               <p className="text-sm opacity-80 mt-3 border-t border-current/15 pt-3">
                 The auditor approved this lead despite {scorecard.failed} flagged check{scorecard.failed !== 1 ? "s" : ""}. No individual overrides were recorded — the approval covers the lead as a whole.
               </p>

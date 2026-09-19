@@ -85,6 +85,7 @@ class Lead(Base):
         Enum(GateDecision, name="gate_decision_enum", create_constraint=False),
         default=GateDecision.PENDING,
     )
+    status_comment: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
